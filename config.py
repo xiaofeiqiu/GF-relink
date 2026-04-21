@@ -3,6 +3,7 @@ import random
 import threading
 import logging
 import win32gui
+from app.paths import template_path
 from gbf.runner import MacroFn
 from gbf.sender import InputSender
 from gbf.capture import MssScreenCapturer, ScreenCapturer
@@ -14,9 +15,29 @@ WINDOW_TITLE = "Granblue Fantasy: Relink"
 
 SHILAIMU = "shilaimu"
 
+ATTACK_TEMPLATE = template_path("attack.png")
+CONFIRM_TEMPLATE = template_path("confirm.png")
+CANCEL_REPEAT_TEMPLATE = template_path("cancle-repeat.png")
+AGAIN_TEMPLATE = template_path("again.png")
+CYCLE_REPEAT_TEMPLATE = template_path("cycle-repeat.bmp")
+AOYI_TEMPLATE = template_path("aoyi.bmp")
+R_TEMPLATE = template_path("r.bmp")
+REPORT_TEMPLATE = template_path("report.bmp")
+
 
 def wait_or_stop(stop_event: threading.Event, timeout: float) -> bool:
     return stop_event.wait(timeout)
+
+
+def wait_until_event_set(
+    event: threading.Event,
+    stop_event: threading.Event,
+    interval: float = 0.1,
+) -> bool:
+    while not stop_event.is_set():
+        if event.wait(interval):
+            return True
+    return False
 
 
 class CombinedEvent:
@@ -74,7 +95,7 @@ def keep_attack_enabled_while_attack_button_is_visible(
     while not stop_event.is_set():
         if not wait_until_focused(hwnd, focus_event, stop_event):
             break
-        if detector.detect("templates/attack.png", capturer.capture(hwnd), threshold):
+        if detector.detect(ATTACK_TEMPLATE, capturer.capture(hwnd), threshold):
             can_attack.set()
         else:
             can_attack.clear()
@@ -90,12 +111,12 @@ def spam_left_clicks_while_attack_is_enabled(
     interval: float = 0.05,
 ) -> None:
     while not stop_event.is_set():
-        if not focus_event.wait(0.1):
+        if not wait_until_event_set(focus_event, stop_event):
             continue
-        if not can_attack.wait(0.1):
+        if not wait_until_event_set(can_attack, stop_event):
             continue
-        if stop_event.is_set() or not focus_event.is_set():
-            break
+        if stop_event.is_set() or not focus_event.is_set() or not can_attack.is_set():
+            continue
         sender.click_left()
         if wait_or_stop(stop_event, interval):
             break
@@ -109,19 +130,19 @@ def move(
 ) -> None:
     movement_allowed = CombinedEvent(focus_event, can_attack)
     while not stop_event.is_set():
-        if not focus_event.wait(0.1):
+        if not wait_until_event_set(focus_event, stop_event):
             continue
-        if not can_attack.wait(0.1):
+        if not wait_until_event_set(can_attack, stop_event):
             continue
         if not movement_allowed.is_set():
             continue
         log.info("Hold w for 10.0s")
-        sender.hold("w", 10.0, hold_while=movement_allowed)
+        sender.hold("w", 10.0, hold_while=movement_allowed, stop_event=stop_event)
         if stop_event.is_set() or not movement_allowed.is_set():
             continue
         side_key = random.choice(["a", "d"])
         log.info(f"Hold {side_key} for 3.0s")
-        sender.hold(side_key, 3.0, hold_while=movement_allowed)
+        sender.hold(side_key, 3.0, hold_while=movement_allowed, stop_event=stop_event)
 
 
 def press_enter_when_confirm_dialog_is_visible(
@@ -137,8 +158,8 @@ def press_enter_when_confirm_dialog_is_visible(
     while not stop_event.is_set():
         if not wait_until_focused(hwnd, focus_event, stop_event):
             break
-        if detector.detect("templates/confirm.png", capturer.capture(hwnd), threshold):
-            log.info("templates/confirm.png found")
+        if detector.detect(CONFIRM_TEMPLATE, capturer.capture(hwnd), threshold):
+            log.info("%s found", CONFIRM_TEMPLATE)
             if wait_or_stop(stop_event, 0.1):
                 break
             sender.press("enter")
@@ -160,8 +181,8 @@ def repeat_again(
     while not stop_event.is_set():
         if not wait_until_focused(hwnd, focus_event, stop_event):
             break
-        if detector.detect("templates/cancle-repeat.png", capturer.capture(hwnd), threshold):
-            log.info("templates/cancle-repeat.png found")
+        if detector.detect(CANCEL_REPEAT_TEMPLATE, capturer.capture(hwnd), threshold):
+            log.info("%s found", CANCEL_REPEAT_TEMPLATE)
             if wait_or_stop(stop_event, 2.0):
                 break
             sender.press("enter")
@@ -184,10 +205,10 @@ def first_time_repeat(
         if not wait_until_focused(hwnd, focus_event, stop_event):
             break
         screenshot = capturer.capture(hwnd)
-        if detector.detect("templates/again.png", screenshot, threshold) and not detector.detect(
-            "templates/cancle-repeat.png", screenshot, threshold
+        if detector.detect(AGAIN_TEMPLATE, screenshot, threshold) and not detector.detect(
+            CANCEL_REPEAT_TEMPLATE, screenshot, threshold
         ):
-            log.info("templates/again.png found without templates/cancle-repeat.png")
+            log.info("%s found without %s", AGAIN_TEMPLATE, CANCEL_REPEAT_TEMPLATE)
             if wait_or_stop(stop_event, 0.1):
                 break
             sender.press("3")
@@ -213,8 +234,8 @@ def cycle_repeat(
     while not stop_event.is_set():
         if not wait_until_focused(hwnd, focus_event, stop_event):
             break
-        if detector.detect("templates/cycle-repeat.bmp", capturer.capture(hwnd), threshold):
-            log.info("templates/cycle-repeat.bmp found")
+        if detector.detect(CYCLE_REPEAT_TEMPLATE, capturer.capture(hwnd), threshold):
+            log.info("%s found", CYCLE_REPEAT_TEMPLATE)
             if wait_or_stop(stop_event, 0.1):
                 break
             sender.press("w")
@@ -240,8 +261,8 @@ def aoyi(
     while not stop_event.is_set():
         if not wait_until_focused(hwnd, focus_event, stop_event):
             break
-        if detector.detect("templates/aoyi.bmp", capturer.capture(hwnd), threshold):
-            log.info("templates/aoyi.bmp found")
+        if detector.detect(AOYI_TEMPLATE, capturer.capture(hwnd), threshold):
+            log.info("%s found", AOYI_TEMPLATE)
             if wait_or_stop(stop_event, 0.1):
                 break
             sender.press("g")
@@ -263,8 +284,8 @@ def press_r_when_r_template_is_visible(
     while not stop_event.is_set():
         if not wait_until_focused(hwnd, focus_event, stop_event):
             break
-        if detector.detect("templates/r.bmp", capturer.capture(hwnd), threshold):
-            log.info("templates/r.bmp found")
+        if detector.detect(R_TEMPLATE, capturer.capture(hwnd), threshold):
+            log.info("%s found", R_TEMPLATE)
             if wait_or_stop(stop_event, 0.1):
                 break
             sender.press("r")
@@ -285,12 +306,12 @@ def fire_skill(
     if wait_or_stop(stop_event, cycle_interval):
         return
     while not stop_event.is_set():
-        if not focus_event.wait(0.1):
+        if not wait_until_event_set(focus_event, stop_event):
             continue
-        if not can_attack.wait(0.1):
+        if not wait_until_event_set(can_attack, stop_event):
             continue
-        if stop_event.is_set() or not focus_event.is_set():
-            break
+        if stop_event.is_set() or not focus_event.is_set() or not can_attack.is_set():
+            continue
         sender.click_middle()
         log.info("Click middle")
         if wait_or_stop(stop_event, 0.1):
@@ -319,7 +340,7 @@ def keep_report_confirmation_enabled_while_report_is_visible(
     while not stop_event.is_set():
         if not wait_until_focused(hwnd, focus_event, stop_event):
             break
-        if detector.detect("templates/report.bmp", capturer.capture(hwnd), threshold):
+        if detector.detect(REPORT_TEMPLATE, capturer.capture(hwnd), threshold):
             report_visible.set()
         else:
             report_visible.clear()
@@ -335,12 +356,12 @@ def spam_enter_while_report_confirmation_is_enabled(
     interval: float = 0.2,
 ) -> None:
     while not stop_event.is_set():
-        if not focus_event.wait(0.1):
+        if not wait_until_event_set(focus_event, stop_event):
             continue
-        if not report_visible.wait(0.1):
+        if not wait_until_event_set(report_visible, stop_event):
             continue
-        if stop_event.is_set() or not focus_event.is_set():
-            break
+        if stop_event.is_set() or not focus_event.is_set() or not report_visible.is_set():
+            continue
         sender.press("enter")
         log.info("Press enter")
         if wait_or_stop(stop_event, interval):
@@ -551,14 +572,13 @@ def create_report_confirm_spam_thread(
     )
 
 
-def shilaimu(sender: InputSender, hwnd: int) -> None:
+def shilaimu(sender: InputSender, hwnd: int, stop_event: threading.Event) -> None:
     capturer = MssScreenCapturer()
     detector = OpenCVTemplateDetector()
 
     focus_event = threading.Event()
     can_attack = threading.Event()
     report_visible = threading.Event()
-    stop_event = threading.Event()
 
     threads = [
         threading.Thread(
@@ -583,14 +603,12 @@ def shilaimu(sender: InputSender, hwnd: int) -> None:
         for t in threads:
             t.start()
 
-        threads[1].join()
+        threads[0].join()
     finally:
         stop_event.set()
-        focus_event.set()
-        can_attack.set()
-        report_visible.set()
+        sender.release_all()
         for t in threads:
-            t.join(timeout=1.0)
+            t.join(timeout=2.0)
 
 
 configs: dict[str, MacroFn] = {

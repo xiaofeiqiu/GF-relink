@@ -17,7 +17,13 @@ class InputSender(ABC):
         pass
 
     @abstractmethod
-    def hold(self, key: str, duration: float, hold_while: threading.Event | None = None) -> None:
+    def hold(
+        self,
+        key: str,
+        duration: float,
+        hold_while: threading.Event | None = None,
+        stop_event: threading.Event | None = None,
+    ) -> None:
         pass
 
     @abstractmethod
@@ -41,16 +47,31 @@ class DirectInputSender(InputSender):
     def press(self, key: str) -> None:
         pydirectinput.press(key)
 
-    def hold(self, key: str, duration: float, hold_while: threading.Event | None = None) -> None:
+    def hold(
+        self,
+        key: str,
+        duration: float,
+        hold_while: threading.Event | None = None,
+        stop_event: threading.Event | None = None,
+    ) -> None:
         with self._lock:
             self._held_keys.add(key)
         try:
             pydirectinput.keyDown(key)
             if hold_while is None:
-                time.sleep(duration)
+                if stop_event is None:
+                    time.sleep(duration)
+                else:
+                    end = time.monotonic() + duration
+                    while time.monotonic() < end and not stop_event.is_set():
+                        time.sleep(0.05)
             else:
                 end = time.monotonic() + duration
-                while time.monotonic() < end and hold_while.is_set():
+                while (
+                    time.monotonic() < end
+                    and hold_while.is_set()
+                    and (stop_event is None or not stop_event.is_set())
+                ):
                     time.sleep(0.05)
         finally:
             pydirectinput.keyUp(key)
