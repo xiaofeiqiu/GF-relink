@@ -205,10 +205,16 @@ Current targets:
 - `make exe`
 - `make clean`
 
+Windows-native alternative:
+- `.\build.ps1 bootstrap-build`
+- `.\build.ps1 exe`
+- `.\build.ps1 clean`
+
 Notes:
 - `make exe` builds a Windows app with PyInstaller
 - templates are bundled with `--add-data "templates;templates"`
 - asset loading works in both source and bundled runs through `app/paths.py`
+- On Windows, `make` may not be installed by default, so prefer `build.ps1` unless you already have GNU Make available
 
 If packaging changes:
 - keep bundled asset handling compatible with PyInstaller
