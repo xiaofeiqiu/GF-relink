@@ -302,7 +302,7 @@ def fire_skill(
     key_interval: float = 0.5,
     cycle_interval: float = 5.0,
 ) -> None:
-    combo_keys = ["2", "3", "4"]
+    combo_keys = ["1", "2", "3", "4"]
     if wait_or_stop(stop_event, cycle_interval):
         return
     while not stop_event.is_set():

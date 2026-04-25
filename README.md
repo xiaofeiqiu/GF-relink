@@ -19,6 +19,12 @@ After building, the app executable is here:
 If the `dist` folder does not exist yet, build it first:
 
 ```powershell
+make build
+```
+
+Or with the PowerShell script:
+
+```powershell
 .\build.ps1 bootstrap-build
 .\build.ps1 exe
 ```
@@ -46,6 +52,15 @@ If the `dist` folder does not exist yet, build it first:
 - `Stop` is designed to terminate the running macro threads and release held input.
 
 ## Build Commands
+
+```powershell
+make build
+make bootstrap-build
+make exe
+make clean
+```
+
+Or with the PowerShell script:
 
 ```powershell
 .\build.ps1 bootstrap-build

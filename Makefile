@@ -6,7 +6,9 @@ APP_NAME := gbf-macro
 SPEC_FILE := $(APP_NAME).spec
 PYINSTALLER := $(PYTHON) -m PyInstaller
 
-.PHONY: bootstrap-build exe clean
+.PHONY: build bootstrap-build exe clean
+
+build: bootstrap-build exe
 
 bootstrap-build:
 	@if (-not (Test-Path '$(PYTHON)')) { throw 'Missing virtualenv python at $(PYTHON)' }
