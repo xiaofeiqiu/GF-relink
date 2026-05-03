@@ -1,7 +1,14 @@
 import logging
 import threading
 
-from config import WINDOW_TITLE, configs
+from config import (
+    PROCESS_MODULE_NAME,
+    WINDOW_TITLE,
+    configs,
+    infinite_lottery_watcher,
+    run_worker,
+)
+from gbf.memory import ProcessMemory, pid_from_hwnd
 from gbf.runner import Runner
 from gbf.sender import DirectInputSender
 from gbf.window import Win32WindowFinder
@@ -17,6 +24,10 @@ class MacroController:
         self._lock = threading.Lock()
         self._worker_thread: threading.Thread | None = None
         self._stop_event: threading.Event | None = None
+        self._lottery_lock = threading.Lock()
+        self._lottery_thread: threading.Thread | None = None
+        self._lottery_stop: threading.Event | None = None
+        self._lottery_memory: ProcessMemory | None = None
 
     def is_running(self) -> bool:
         with self._lock:
@@ -63,9 +74,72 @@ class MacroController:
         return True, "Stopped."
 
     def close(self) -> tuple[bool, str]:
+        self.stop_lottery(timeout=3.0)
         result = self.stop(timeout=5.0)
         self._sender.release_all()
         return result
+
+    def is_lottery_running(self) -> bool:
+        with self._lottery_lock:
+            return self._lottery_thread is not None and self._lottery_thread.is_alive()
+
+    def start_lottery(self) -> tuple[bool, str]:
+        with self._lottery_lock:
+            if self._lottery_thread is not None and self._lottery_thread.is_alive():
+                return False, "Infinite lottery is already running."
+
+            hwnd = self._finder.find(WINDOW_TITLE)
+            if not hwnd:
+                return False, f"Window not found: {WINDOW_TITLE}"
+
+            pid = pid_from_hwnd(hwnd)
+            try:
+                memory = ProcessMemory(pid, PROCESS_MODULE_NAME)
+            except Exception as exc:
+                log.exception("Failed to open process memory")
+                return False, (
+                    f"Failed to open process memory: {exc}. "
+                    "Make sure the game is running in offline mode (EAC disabled)."
+                )
+
+            stop_event = threading.Event()
+            worker = threading.Thread(
+                target=run_worker,
+                args=(infinite_lottery_watcher, (memory, stop_event, 1.0)),
+                name="lottery-watcher",
+                daemon=True,
+            )
+            self._lottery_memory = memory
+            self._lottery_stop = stop_event
+            self._lottery_thread = worker
+            worker.start()
+            return True, "Started infinite lottery."
+
+    def stop_lottery(self, timeout: float = 3.0) -> tuple[bool, str]:
+        with self._lottery_lock:
+            worker = self._lottery_thread
+            stop_event = self._lottery_stop
+            memory = self._lottery_memory
+
+        if worker is None or stop_event is None:
+            return True, "Infinite lottery is not running."
+
+        stop_event.set()
+        worker.join(timeout=timeout)
+
+        if worker.is_alive():
+            return False, "Timed out while stopping lottery watcher."
+
+        if memory is not None:
+            memory.close()
+
+        with self._lottery_lock:
+            if self._lottery_thread is worker:
+                self._lottery_thread = None
+                self._lottery_stop = None
+                self._lottery_memory = None
+
+        return True, "Stopped infinite lottery."
 
     def _run_macro(self, hwnd: int, config_name: str, macro_fn, stop_event: threading.Event) -> None:
         log.info("Starting config '%s'", config_name)

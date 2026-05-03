@@ -1,5 +1,6 @@
 import time
 import random
+import struct
 import threading
 import logging
 import win32gui
@@ -8,10 +9,22 @@ from gbf.runner import MacroFn
 from gbf.sender import InputSender
 from gbf.capture import MssScreenCapturer, ScreenCapturer
 from gbf.detection import OpenCVTemplateDetector, PatternDetector
+from gbf.memory import ProcessMemory
 
 log = logging.getLogger("config")
 
 WINDOW_TITLE = "Granblue Fantasy: Relink"
+PROCESS_MODULE_NAME = "granblue_fantasy_relink.exe"
+LOTTERY_TICKET_BASE_OFFSET = 0x05E48188
+LOTTERY_TICKET_POINTER_OFFSETS = (0x2E8, 0x78, 0x504)
+LOTTERY_TICKET_TARGET = 999
+ITEM_SCAN_BACK = 0x9000
+ITEM_SCAN_FORWARD = 0xA000
+ITEM_SLOT_TYPES = frozenset({4, 12})
+ITEM_ID_MIN = 1000
+ITEM_ID_MAX = 100000
+ITEM_QTY_MIN = 1
+ITEM_QTY_MAX = 999
 
 SHILAIMU = "shilaimu"
 
@@ -23,6 +36,7 @@ CYCLE_REPEAT_TEMPLATE = template_path("cycle-repeat.bmp")
 AOYI_TEMPLATE = template_path("aoyi.bmp")
 R_TEMPLATE = template_path("r.bmp")
 REPORT_TEMPLATE = template_path("report.bmp")
+FUHUO_TEMPLATE = template_path("fuhuo.bmp")
 
 
 def wait_or_stop(stop_event: threading.Event, timeout: float) -> bool:
@@ -118,6 +132,28 @@ def spam_left_clicks_while_attack_is_enabled(
         if stop_event.is_set() or not focus_event.is_set() or not can_attack.is_set():
             continue
         sender.click_left()
+        if wait_or_stop(stop_event, interval):
+            break
+
+
+def spam_c_while_attack_is_enabled(
+    sender: InputSender,
+    focus_event: threading.Event,
+    can_attack: threading.Event,
+    stop_event: threading.Event,
+    hold_duration: float = 1.5,
+    interval: float = 5.0,
+) -> None:
+    hold_allowed = CombinedEvent(focus_event, can_attack)
+    while not stop_event.is_set():
+        if not wait_until_event_set(focus_event, stop_event):
+            continue
+        if not wait_until_event_set(can_attack, stop_event):
+            continue
+        if stop_event.is_set() or not hold_allowed.is_set():
+            continue
+        log.info("Hold c for %.1fs", hold_duration)
+        sender.hold("c", hold_duration, hold_while=hold_allowed, stop_event=stop_event)
         if wait_or_stop(stop_event, interval):
             break
 
@@ -271,6 +307,46 @@ def aoyi(
             break
 
 
+def keep_fuhuo_enabled_while_fuhuo_template_is_visible(
+    capturer: ScreenCapturer,
+    detector: PatternDetector,
+    hwnd: int,
+    focus_event: threading.Event,
+    fuhuo_visible: threading.Event,
+    stop_event: threading.Event,
+    interval: float = 0.2,
+    threshold: float = 0.7
+) -> None:
+    while not stop_event.is_set():
+        if not wait_until_focused(hwnd, focus_event, stop_event):
+            break
+        if detector.detect(FUHUO_TEMPLATE, capturer.capture(hwnd), threshold):
+            fuhuo_visible.set()
+        else:
+            fuhuo_visible.clear()
+        if wait_or_stop(stop_event, interval):
+            break
+
+
+def hold_v_while_fuhuo_is_enabled(
+    sender: InputSender,
+    focus_event: threading.Event,
+    fuhuo_visible: threading.Event,
+    stop_event: threading.Event,
+    max_hold_seconds: float = 30.0,
+) -> None:
+    hold_allowed = CombinedEvent(focus_event, fuhuo_visible)
+    while not stop_event.is_set():
+        if not wait_until_event_set(focus_event, stop_event):
+            continue
+        if not wait_until_event_set(fuhuo_visible, stop_event):
+            continue
+        if stop_event.is_set() or not hold_allowed.is_set():
+            continue
+        log.info("Hold v while %s visible", FUHUO_TEMPLATE)
+        sender.hold("v", max_hold_seconds, hold_while=hold_allowed, stop_event=stop_event)
+
+
 def press_r_when_r_template_is_visible(
     capturer: ScreenCapturer,
     detector: PatternDetector,
@@ -299,10 +375,12 @@ def fire_skill(
     focus_event: threading.Event,
     can_attack: threading.Event,
     stop_event: threading.Event,
+    key_hold_duration: float = 0.1,
     key_interval: float = 0.5,
     cycle_interval: float = 5.0,
 ) -> None:
-    combo_keys = ["1", "2", "3", "4"]
+    combo_keys = ["2", "3", "4"]
+    hold_allowed = CombinedEvent(focus_event, can_attack)
     if wait_or_stop(stop_event, cycle_interval):
         return
     while not stop_event.is_set():
@@ -310,19 +388,43 @@ def fire_skill(
             continue
         if not wait_until_event_set(can_attack, stop_event):
             continue
-        if stop_event.is_set() or not focus_event.is_set() or not can_attack.is_set():
+        if stop_event.is_set() or not hold_allowed.is_set():
             continue
         sender.click_middle()
         log.info("Click middle")
         if wait_or_stop(stop_event, 0.1):
             break
         for key in combo_keys:
-            if stop_event.is_set() or not can_attack.is_set() or not focus_event.is_set():
+            if stop_event.is_set() or not hold_allowed.is_set():
                 break
-            sender.press(key)
-            log.info(f"Press {key}")
+            log.info("Hold %s for %.1fs", key, key_hold_duration)
+            sender.hold(key, key_hold_duration, hold_while=hold_allowed, stop_event=stop_event)
             if wait_or_stop(stop_event, key_interval):
                 break
+        if wait_or_stop(stop_event, cycle_interval):
+            break
+
+
+def fire_skill_1(
+    sender: InputSender,
+    focus_event: threading.Event,
+    can_attack: threading.Event,
+    stop_event: threading.Event,
+    hold_duration: float = 5.0,
+    cycle_interval: float = 15.0,
+) -> None:
+    hold_allowed = CombinedEvent(focus_event, can_attack)
+    if wait_or_stop(stop_event, cycle_interval):
+        return
+    while not stop_event.is_set():
+        if not wait_until_event_set(focus_event, stop_event):
+            continue
+        if not wait_until_event_set(can_attack, stop_event):
+            continue
+        if stop_event.is_set() or not hold_allowed.is_set():
+            continue
+        log.info("Hold 1 for %.1fs", hold_duration)
+        sender.hold("1", hold_duration, hold_while=hold_allowed, stop_event=stop_event)
         if wait_or_stop(stop_event, cycle_interval):
             break
 
@@ -368,12 +470,58 @@ def spam_enter_while_report_confirmation_is_enabled(
             break
 
 
+def _refill_item_slots(memory: ProcessMemory, known_slot: int) -> tuple[int, int]:
+    start_addr = known_slot - ITEM_SCAN_BACK
+    end_addr = known_slot + ITEM_SCAN_FORWARD
+    length = (end_addr + 12) - start_addr
+    blob = memory.read_bytes(start_addr, length)
+    n_ints = length // 4
+    ints = struct.unpack(f"<{n_ints}I", blob[: n_ints * 4])
+
+    found = 0
+    changed = 0
+    for i in range(n_ints - 2):
+        qty = ints[i]
+        typ = ints[i + 1]
+        item_id = ints[i + 2]
+        if (
+            ITEM_QTY_MIN <= qty <= ITEM_QTY_MAX
+            and typ in ITEM_SLOT_TYPES
+            and ITEM_ID_MIN <= item_id <= ITEM_ID_MAX
+        ):
+            found += 1
+            if qty < LOTTERY_TICKET_TARGET:
+                memory.write_uint32(start_addr + i * 4, LOTTERY_TICKET_TARGET)
+                changed += 1
+    return found, changed
+
+
+def infinite_lottery_watcher(
+    memory: ProcessMemory,
+    stop_event: threading.Event,
+    interval: float = 1.0,
+) -> None:
+    while not stop_event.is_set():
+        if wait_or_stop(stop_event, interval):
+            break
+        try:
+            known_slot = memory.resolve_pointer_chain(
+                LOTTERY_TICKET_BASE_OFFSET, LOTTERY_TICKET_POINTER_OFFSETS
+            )
+            found, changed = _refill_item_slots(memory, known_slot)
+            if changed > 0:
+                log.info("Item refill: slots found=%d, refilled=%d", found, changed)
+        except Exception:
+            log.exception("Lottery watcher iteration failed")
+
+
 def monitor_window_focus(
     sender: InputSender,
     hwnd: int,
     focus_event: threading.Event,
     can_attack: threading.Event,
     report_visible: threading.Event,
+    fuhuo_visible: threading.Event,
     stop_event: threading.Event,
     interval: float = 0.1,
 ) -> None:
@@ -391,6 +539,7 @@ def monitor_window_focus(
             focus_event.clear()
             can_attack.clear()
             report_visible.clear()
+            fuhuo_visible.clear()
         was_focused = focused
         if wait_or_stop(stop_event, interval):
             break
@@ -423,6 +572,18 @@ def create_basic_attack_spam_thread(
     return threading.Thread(
         target=run_worker,
         args=(spam_left_clicks_while_attack_is_enabled, (sender, focus_event, can_attack, stop_event, 0.05)),
+    )
+
+
+def create_c_key_spam_thread(
+    sender: InputSender,
+    focus_event: threading.Event,
+    can_attack: threading.Event,
+    stop_event: threading.Event,
+) -> threading.Thread:
+    return threading.Thread(
+        target=run_worker,
+        args=(spam_c_while_attack_is_enabled, (sender, focus_event, can_attack, stop_event, 1.5, 5.0)),
     )
 
 
@@ -512,6 +673,36 @@ def aoyi_watcher(
     )
 
 
+def create_fuhuo_state_watcher_thread(
+    capturer: ScreenCapturer,
+    detector: PatternDetector,
+    hwnd: int,
+    focus_event: threading.Event,
+    fuhuo_visible: threading.Event,
+    stop_event: threading.Event,
+) -> threading.Thread:
+    return threading.Thread(
+        target=run_worker,
+        args=(
+            keep_fuhuo_enabled_while_fuhuo_template_is_visible,
+            (capturer, detector, hwnd, focus_event, fuhuo_visible, stop_event, 0.2, 0.8),
+            capturer,
+        ),
+    )
+
+
+def create_fuhuo_v_hold_thread(
+    sender: InputSender,
+    focus_event: threading.Event,
+    fuhuo_visible: threading.Event,
+    stop_event: threading.Event,
+) -> threading.Thread:
+    return threading.Thread(
+        target=run_worker,
+        args=(hold_v_while_fuhuo_is_enabled, (sender, focus_event, fuhuo_visible, stop_event, 30.0)),
+    )
+
+
 def create_combo_skill_rotation_thread(
     sender: InputSender,
     focus_event: threading.Event,
@@ -520,7 +711,19 @@ def create_combo_skill_rotation_thread(
 ) -> threading.Thread:
     return threading.Thread(
         target=run_worker,
-        args=(fire_skill, (sender, focus_event, can_attack, stop_event, 1.0, 5.0)),
+        args=(fire_skill, (sender, focus_event, can_attack, stop_event, 0.1, 1.0, 5.0)),
+    )
+
+
+def create_skill_1_hold_thread(
+    sender: InputSender,
+    focus_event: threading.Event,
+    can_attack: threading.Event,
+    stop_event: threading.Event,
+) -> threading.Thread:
+    return threading.Thread(
+        target=run_worker,
+        args=(fire_skill_1, (sender, focus_event, can_attack, stop_event, 5.0, 15.0)),
     )
 
 
@@ -579,21 +782,29 @@ def shilaimu(sender: InputSender, hwnd: int, stop_event: threading.Event) -> Non
     focus_event = threading.Event()
     can_attack = threading.Event()
     report_visible = threading.Event()
+    fuhuo_visible = threading.Event()
 
     threads = [
         threading.Thread(
             target=run_worker,
-            args=(monitor_window_focus, (sender, hwnd, focus_event, can_attack, report_visible, stop_event)),
+            args=(
+                monitor_window_focus,
+                (sender, hwnd, focus_event, can_attack, report_visible, fuhuo_visible, stop_event),
+            ),
         ),
         create_attack_state_watcher_thread(capturer, detector, hwnd, focus_event, can_attack, stop_event),
         create_basic_attack_spam_thread(sender, focus_event, can_attack, stop_event),
+        create_c_key_spam_thread(sender, focus_event, can_attack, stop_event),
         create_combo_skill_rotation_thread(sender, focus_event, can_attack, stop_event),
+        create_skill_1_hold_thread(sender, focus_event, can_attack, stop_event),
         create_combat_movement_thread(sender, focus_event, can_attack, stop_event),
         create_confirm_dialog_handler_thread(capturer, detector, sender, hwnd, focus_event, stop_event),
         first_time_repeat_watcher(capturer, detector, sender, hwnd, focus_event, stop_event),
         repeat_again_watcher(capturer, detector, sender, hwnd, focus_event, stop_event),
         cycle_repeat_watcher(capturer, detector, sender, hwnd, focus_event, stop_event),
         aoyi_watcher(capturer, detector, sender, hwnd, focus_event, stop_event),
+        create_fuhuo_state_watcher_thread(capturer, detector, hwnd, focus_event, fuhuo_visible, stop_event),
+        create_fuhuo_v_hold_thread(sender, focus_event, fuhuo_visible, stop_event),
         create_r_template_watcher_thread(capturer, detector, sender, hwnd, focus_event, stop_event),
         create_report_state_watcher_thread(capturer, detector, hwnd, focus_event, report_visible, stop_event),
         create_report_confirm_spam_thread(sender, focus_event, report_visible, stop_event),

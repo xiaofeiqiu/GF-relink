@@ -55,6 +55,9 @@ class MacroApp:
         self._stop_button = ttk.Button(controls, text="Stop", command=self._on_stop)
         self._stop_button.pack(side=tk.LEFT, padx=(8, 0))
 
+        self._lottery_button = ttk.Button(controls, text="无限抽奖: OFF", command=self._on_toggle_lottery)
+        self._lottery_button.pack(side=tk.LEFT, padx=(16, 0))
+
         self._status_var = tk.StringVar(value="Idle")
         ttk.Label(frame, textvariable=self._status_var).pack(anchor=tk.W, pady=(10, 8))
 
@@ -85,6 +88,15 @@ class MacroApp:
         self._status_var.set(message)
         self._refresh_controls()
 
+    def _on_toggle_lottery(self) -> None:
+        if self._controller.is_lottery_running():
+            ok, message = self._controller.stop_lottery()
+        else:
+            ok, message = self._controller.start_lottery()
+        if not ok:
+            messagebox.showerror("无限抽奖", message)
+        self._refresh_controls()
+
     def _on_stop(self) -> None:
         if self._stop_requested:
             return
@@ -112,6 +124,8 @@ class MacroApp:
         self._start_button.config(state=tk.DISABLED if running else tk.NORMAL)
         self._config_dropdown.config(state="disabled" if running else "readonly")
         self._stop_button.config(state=tk.NORMAL if running and not self._stop_requested else tk.DISABLED)
+        lottery_on = self._controller.is_lottery_running()
+        self._lottery_button.config(text=f"无限抽奖: {'ON' if lottery_on else 'OFF'}")
         if running and not self._status_var.get().startswith("Stopping"):
             self._status_var.set(f"Running {self._config_name.get()}")
         elif not running and self._status_var.get().startswith("Running"):

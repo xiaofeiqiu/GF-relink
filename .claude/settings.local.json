@@ -3,7 +3,13 @@
     "allow": [
       "Bash(uv pip *)",
       "Bash(uv venv *)",
-      "Bash(.venv/Scripts/pip install *)"
+      "Bash(.venv/Scripts/pip install *)",
+      "Bash(./.venv/Scripts/python.exe -m pip install pymem)",
+      "Bash(./.venv/Scripts/python.exe -c \"import pymem; import pymem.process; print\\(pymem.__version__\\); print\\(dir\\(pymem.Pymem\\)\\); print\\('---'\\); print\\([m for m in dir\\(pymem.process\\) if not m.startswith\\('_'\\)]\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import pymem; import pymem.process; print\\([m for m in dir\\(pymem.Pymem\\) if not m.startswith\\('_'\\)]\\); print\\('---'\\); print\\([m for m in dir\\(pymem.process\\) if not m.startswith\\('_'\\)]\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import inspect, pymem.process; print\\(inspect.signature\\(pymem.process.module_from_name\\)\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import config; import app.controller; import app.ui; print\\('imports ok'\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c ' *)"
     ]
   }
 }
